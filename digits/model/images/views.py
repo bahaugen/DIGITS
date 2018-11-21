@@ -1,7 +1,6 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
-from digits.webapp import app
-import classification.views
+import flask
 
-NAMESPACE = '/models/images'
-
+blueprint = flask.Blueprint(__name__, __name__)

@@ -1,14 +1,16 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
-import os.path
+import os
 
-from digits.dataset import tasks
-from digits import utils
-from digits.utils import subclass, override
 from ..job import ImageDatasetJob
+from digits.dataset import tasks
+from digits.status import Status
+from digits.utils import subclass, override, constants
 
-# NOTE: Increment this everytime the pickled object changes
-PICKLE_VERSION = 1
+# NOTE: Increment this every time the pickled object changes
+PICKLE_VERSION = 2
+
 
 @subclass
 class ImageClassificationDatasetJob(ImageDatasetJob):
@@ -22,125 +24,169 @@ class ImageClassificationDatasetJob(ImageDatasetJob):
 
         self.labels_file = None
 
+    def __setstate__(self, state):
+        super(ImageClassificationDatasetJob, self).__setstate__(state)
+
+        if self.pickver_job_dataset_image_classification <= 1:
+            task = self.train_db_task()
+            if task.image_dims[2] == 3:
+                if task.encoding == "jpg":
+                    if task.mean_file.endswith('.binaryproto'):
+                        import numpy as np
+                        import caffe_pb2
+
+                        old_blob = caffe_pb2.BlobProto()
+                        with open(task.path(task.mean_file), 'rb') as infile:
+                            old_blob.ParseFromString(infile.read())
+                        data = np.array(old_blob.data).reshape(
+                            old_blob.channels,
+                            old_blob.height,
+                            old_blob.width)
+                        data = data[[2, 1, 0], ...]  # channel swap
+                        new_blob = caffe_pb2.BlobProto()
+                        new_blob.num = 1
+                        new_blob.channels, new_blob.height, new_blob.width = data.shape
+                        new_blob.data.extend(data.astype(float).flat)
+                        with open(task.path(task.mean_file), 'wb') as outfile:
+                            outfile.write(new_blob.SerializeToString())
+                else:
+                    self.status = Status.ERROR
+                    for task in self.tasks:
+                        task.status = Status.ERROR
+                        task.exception = ('This dataset was created with unencoded '
+                                          'RGB channels. Caffe requires BGR input.')
+
+        self.pickver_job_dataset_image_classification = PICKLE_VERSION
+
+    def create_db_tasks(self):
+        """
+        Return all CreateDbTasks for this job
+        """
+        return [t for t in self.tasks if isinstance(t, tasks.CreateDbTask)]
+
+    @override
+    def get_backend(self):
+        """
+        Return the DB backend used to create this dataset
+        """
+        return self.train_db_task().backend
+
+    def get_encoding(self):
+        """
+        Return the DB encoding used to create this dataset
+        """
+        return self.train_db_task().encoding
+
+    def get_compression(self):
+        """
+        Return the DB compression used to create this dataset
+        """
+        return self.train_db_task().compression
+
+    @override
+    def get_entry_count(self, stage):
+        """
+        Return the number of entries in the DB matching the specified stage
+        """
+        if stage == constants.TRAIN_DB:
+            db = self.train_db_task()
+        elif stage == constants.VAL_DB:
+            db = self.val_db_task()
+        elif stage == constants.TEST_DB:
+            db = self.test_db_task()
+        else:
+            return 0
+        return db.entries_count if db is not None else 0
+
+    @override
+    def get_feature_dims(self):
+        """
+        Return the shape of the feature N-D array
+        """
+        return self.image_dims
+
+    @override
+    def get_feature_db_path(self, stage):
+        """
+        Return the absolute feature DB path for the specified stage
+        """
+        path = self.path(stage)
+        return path if os.path.exists(path) else None
+
+    @override
+    def get_label_db_path(self, stage):
+        """
+        Return the absolute label DB path for the specified stage
+        """
+        # classification datasets don't have label DBs
+        return None
+
+    @override
+    def get_mean_file(self):
+        """
+        Return the mean file
+        """
+        return self.train_db_task().mean_file
+
     @override
     def job_type(self):
         return 'Image Classification Dataset'
 
-    def from_folder(self, folder,
-            percent_val=None, percent_test=None,
-            min_per_category=None,
-            max_per_category=None,
-            ):
+    @override
+    def json_dict(self, verbose=False):
+        d = super(ImageClassificationDatasetJob, self).json_dict(verbose)
+
+        if verbose:
+            d.update({
+                'ParseFolderTasks': [{
+                    "name":        t.name(),
+                    "label_count": t.label_count,
+                    "train_count": t.train_count,
+                    "val_count":   t.val_count,
+                    "test_count":  t.test_count,
+                } for t in self.parse_folder_tasks()],
+                'CreateDbTasks': [{
+                    "name":             t.name(),
+                    "entries":          t.entries_count,
+                    "image_width":      t.image_dims[0],
+                    "image_height":     t.image_dims[1],
+                    "image_channels":   t.image_dims[2],
+                    "backend":          t.backend,
+                    "encoding":         t.encoding,
+                    "compression":      t.compression,
+                } for t in self.create_db_tasks()],
+            })
+        return d
+
+    def parse_folder_tasks(self):
         """
-        Add tasks for creating a dataset by parsing a folder of images
-
-        Arguments:
-        folder -- the folder to parse
-
-        Keyword arguments:
-        percent_val -- percent of images to use for validation
-        percent_test -- percent of images to use for testing
-        min_per_category -- minimum images per category
-        max_per_category -- maximum images per category
+        Return all ParseFolderTasks for this job
         """
-        assert len(self.tasks) == 0
+        return [t for t in self.tasks if isinstance(t, tasks.ParseFolderTask)]
 
-        self.labels_file = utils.constants.LABELS_FILE
-
-        ### Add ParseFolderTask
-
-        task = tasks.ParseFolderTask(
-                job_dir     = self.dir(),
-                folder      = folder,
-                percent_val = percent_val,
-                percent_test= percent_test
-                )
-        self.tasks.append(task)
-
-        ### Add CreateDbTasks
-
-        self.tasks.append(
-                tasks.CreateDbTask(
-                    job_dir     = self.dir(),
-                    parents     = task,
-                    input_file  = utils.constants.TRAIN_FILE,
-                    db_name     = utils.constants.TRAIN_DB,
-                    image_dims  = self.image_dims,
-                    resize_mode = self.resize_mode,
-                    mean_file   = utils.constants.MEAN_FILE_CAFFE,
-                    labels_file = self.labels_file,
-                    )
-                )
-
-        if task.percent_val > 0:
-            self.tasks.append(
-                    tasks.CreateDbTask(
-                        job_dir     = self.dir(),
-                        parents     = task,
-                        input_file  = utils.constants.VAL_FILE,
-                        db_name     = utils.constants.VAL_DB,
-                        image_dims  = self.image_dims,
-                        resize_mode = self.resize_mode,
-                        labels_file = self.labels_file,
-                        )
-                    )
-
-        if task.percent_test > 0:
-            self.tasks.append(
-                    tasks.CreateDbTask(
-                        job_dir     = self.dir(),
-                        parents     = task,
-                        input_file  = utils.constants.TEST_FILE,
-                        db_name     = utils.constants.TEST_DB,
-                        image_dims  = self.image_dims,
-                        resize_mode = self.resize_mode,
-                        labels_file = self.labels_file,
-                        )
-                    )
-
-    def from_files(self):
+    def test_db_task(self):
         """
-        Checks for files already in the directory
+        Return the task that creates the test set
         """
-        assert len(self.tasks) == 0
+        for t in self.tasks:
+            if isinstance(t, tasks.CreateDbTask) and 'test' in t.name().lower():
+                return t
+        return None
 
-        assert os.path.exists(self.path(utils.constants.TRAIN_FILE))
-        assert os.path.exists(self.path(utils.constants.LABELS_FILE))
-        self.labels_file = utils.constants.LABELS_FILE
+    def train_db_task(self):
+        """
+        Return the task that creates the training set
+        """
+        for t in self.tasks:
+            if isinstance(t, tasks.CreateDbTask) and 'train' in t.name().lower():
+                return t
+        return None
 
-        self.tasks.append(
-                tasks.CreateDbTask(
-                    job_dir     = self.dir(),
-                    input_file  = utils.constants.TRAIN_FILE,
-                    db_name     = utils.constants.TRAIN_DB,
-                    image_dims  = self.image_dims,
-                    resize_mode = self.resize_mode,
-                    mean_file   = utils.constants.MEAN_FILE_CAFFE,
-                    labels_file = self.labels_file,
-                    )
-                )
-
-        if os.path.exists(self.path(utils.constants.VAL_FILE)):
-            self.tasks.append(
-                    tasks.CreateDbTask(
-                        job_dir     = self.dir(),
-                        input_file  = utils.constants.VAL_FILE,
-                        db_name     = utils.constants.VAL_DB,
-                        image_dims  = self.image_dims,
-                        resize_mode = self.resize_mode,
-                        labels_file = self.labels_file,
-                        )
-                    )
-
-        if os.path.exists(self.path(utils.constants.TEST_FILE)):
-            self.tasks.append(
-                    tasks.CreateDbTask(
-                        job_dir     = self.dir(),
-                        input_file  = utils.constants.TEST_FILE,
-                        db_name     = utils.constants.TEST_DB,
-                        image_dims  = self.image_dims,
-                        resize_mode = self.resize_mode,
-                        labels_file = self.labels_file,
-                        )
-                    )
-
+    def val_db_task(self):
+        """
+        Return the task that creates the validation set
+        """
+        for t in self.tasks:
+            if isinstance(t, tasks.CreateDbTask) and 'val' in t.name().lower():
+                return t
+        return None

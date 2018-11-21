@@ -1,19 +1,21 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
 import time
 
-class Status:
+
+class Status():
     """
     A little class to store the state of Jobs and Tasks
     It's pickle-able!
     """
 
-    ### Enum-like attributes
+    # Enum-like attributes
 
     INIT = 'I'
-    WAIT =  'W'
-    RUN =   'R'
-    DONE =  'D'
+    WAIT = 'W'
+    RUN = 'R'
+    DONE = 'D'
     ABORT = 'A'
     ERROR = 'E'
 
@@ -23,7 +25,7 @@ class Status:
     def __str__(self):
         return self.val
 
-    ### Pickling
+    # Pickling
 
     def __getstate__(self):
         return self.val
@@ -31,7 +33,7 @@ class Status:
     def __setstate__(self, state):
         self.set_dict(state)
 
-    ### Operators
+    # Operators
 
     def __eq__(self, other):
         if type(other) == type(self):
@@ -49,7 +51,7 @@ class Status:
         else:
             return True
 
-    ### Member functions
+    # Member functions
 
     def set_dict(self, val):
         self.val = val
@@ -78,6 +80,7 @@ class Status:
     def is_running(self):
         return self.val in (self.INIT, self.WAIT, self.RUN)
 
+
 class StatusCls(object):
     """
     A class that stores a history of Status updates
@@ -85,6 +88,7 @@ class StatusCls(object):
     """
 
     def __init__(self):
+        self.progress = 0
         self.status_history = []
         self.status = Status.INIT
 
@@ -94,7 +98,6 @@ class StatusCls(object):
             return self.status_history[-1][0]
         else:
             return Status.INIT
-        pass
 
     @status.setter
     def status(self, value):
@@ -105,7 +108,7 @@ class StatusCls(object):
         if self.status_history and value == self.status_history[-1][0]:
             return
 
-        self.status_history.append( (value, time.time()) )
+        self.status_history.append((value, time.time()))
 
         # Remove WAIT status if waited for less than 1 second
         if value == Status.RUN and len(self.status_history) >= 2:
@@ -114,8 +117,13 @@ class StatusCls(object):
             if prev[0] == Status.WAIT and (curr[1] - prev[1]) < 1:
                 self.status_history.pop(-2)
 
+        # If the status is Done, then force the progress to 100%
+        if value == Status.DONE:
+            self.progress = 1.0
+            if hasattr(self, 'emit_progress_update'):
+                self.emit_progress_update()
+
         # Don't invoke callback for INIT
         if value != Status.INIT:
             if hasattr(self, 'on_status_update'):
                 self.on_status_update()
-

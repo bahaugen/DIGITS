@@ -1,84 +1,57 @@
-# DiGiTS (Deep GPU Training System)
+# DIGITS
 
-DiGiTS is is a webapp for training deep learning models.
+[![Build Status](https://travis-ci.org/NVIDIA/DIGITS.svg?branch=master)](https://travis-ci.org/NVIDIA/DIGITS)
 
-## Installation
+DIGITS (the **D**eep Learning **G**PU **T**raining **S**ystem) is a webapp for training deep learning models.
+The currently supported frameworks are: Caffe, Torch, and Tensorflow.
 
-We install and run DiGiTS on Ubuntu 14.04.  We have successfully run DiGiTS on other Linux variants as well as OSX but at this time, only Ubuntu 14.04 is supported.
+# Documentation
 
-### Prerequisites
-DiGiTS has several dependencies.
-
-* CUDA
-* cuDNN library
-* Caffe – NVIDIA branch (version 0.10.0 or higher)
-* Python packages
-* Graphviz
-
-1. CUDA (Either 6.5 or 7.0)
-
-  * Download from the [CUDA website](https://developer.nvidia.com/cuda-downloads) and follow the installation instructions.
-
-2. cuDNN (v2 Release Candidate 3 required)
-
-  * Download from the [cuDNN website](https://developer.nvidia.com/cuDNN) and follow the installation instructions.
-
-3. NVIDIA branch of Caffe (NVIDIA version 0.10.0)
-
-Full installation directions are at [Caffe](http://caffe.berkeleyvision.org/installation.html). Condensed version is as follows:
-
-Install caffe:
-<pre>
-% sudo apt-get install git
-% cd $HOME
-% git clone --branch v0.10.0 https://github.com/NVIDIA/caffe.git
-% cd caffe
-% sudo apt-get install libatlas-base-dev libatlas-dev libboost-all-dev libopencv-dev
-% sudo apt-get install libprotobuf-dev libgoogle-glog-dev libgflags-dev protobuf-compiler
-% sudo apt-get install libhdf5-dev libleveldb-dev liblmdb-dev libsnappy-dev
-% sudo apt-get install python-pip gfortran
-% cd python
-% for req in $(cat requirements.txt); do sudo pip install $req; done
-</pre>
-
-Build caffe:
-<pre>
-% cd $HOME/caffe
-% cp Makefile.config.example Makefile.config
-% make all
-% make py
-% make test
-% make runtest
-</pre>
-
-Set environment variables:
-<pre>
-% export CAFFE_HOME=${HOME}/caffe
-</pre>
-
-### Install DiGiTS
-
-<pre>
-% cd $HOME
-% git clone https://github.com/NVIDIA/DIGITS.git digits
-% cd digits
-% sudo apt-get install graphviz gunicorn
-% for req in $(cat requirements.txt); do sudo pip install $req; done
-</pre>
-
-## Starting the server
-
-You can run DiGiTS in two ways:
-
-1.  digits-devserver
-        Starts a development server that listens on port 5000 (but you can
-        change the port if you like - try running it with the --help flag).
-
-2.  digits-server
-        Starts a gunicorn app that listens on port 8080. If you have installed
-        the nginx.site to your nginx sites-enabled/ directory, then you can
-        view your app at http://localhost/.
+Current and most updated document is availabel at
+ [NVIDIA Accelerated Computing, Deep Learning Documentation, NVIDIA DIGITS](https://docs.nvidia.com/deeplearning/digits/index.html).
 
 
-Then, check out the [Getting Started](docs/GettingStarted.md) page.
+# Installation
 
+| Installation method | Supported platform[s] | Available versions | Instructions |
+| --- | --- | --- | --- |
+| Source | Ubuntu 14.04, 16.04 | [GitHub tags](https://github.com/NVIDIA/DIGITS/releases) | [docs/BuildDigits.md](docs/BuildDigits.md) |
+
+
+# Usage
+
+Once you have installed DIGITS, visit [docs/GettingStarted.md](docs/GettingStarted.md) for an introductory walkthrough.
+
+Then, take a look at some of the other documentation at [docs/](docs/) and [examples/](examples/):
+
+* [Getting started with TensorFlow](docs/GettingStartedTensorflow.md)
+* [Getting started with Torch](docs/GettingStartedTorch.md)
+* [Fine-tune a pretrained model](examples/fine-tuning/README.md)
+* [Creating a dataset using data from S3 endpoint](examples/s3/README.md)
+* [Train an autoencoder network](examples/autoencoder/README.md)
+* [Train a regression network](examples/regression/README.md)
+* [Train a Siamese network](examples/siamese/README.md)
+* [Train a text classification network](examples/text-classification/README.md)
+* [Train an object detection network](examples/object-detection/README.md)
+* [Learn more about weight initialization](examples/weight-init/README.md)
+* [Use Python layers in your Caffe networks](examples/python-layer/README.md)
+* [Download a model and use it to classify an image outside of DIGITS](examples/classification/README.md)
+* [Overview of the REST API](docs/API.md)
+
+# Get help
+
+### Installation issues
+* First, check out the instructions above
+* Then, ask questions on our [user group](https://groups.google.com/d/forum/digits-users)
+
+### Usage questions
+* First, check out the [Getting Started](docs/GettingStarted.md) page
+* Then, ask questions on our [user group](https://groups.google.com/d/forum/digits-users)
+
+### Bugs and feature requests
+* Please let us know by [filing a new issue](https://github.com/NVIDIA/DIGITS/issues/new)
+* Bonus points if you want to contribute by opening a [pull request](https://help.github.com/articles/using-pull-requests/)!
+  * You will need to send a signed copy of the [Contributor License Agreement](CLA) to digits@nvidia.com before your change can be accepted.
+
+# Notice on security
+ Users shall understand that DIGITS is not designed to be run as an exposed external web service.

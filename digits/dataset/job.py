@@ -1,11 +1,14 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
 from digits.job import Job
-from . import tasks
+from digits.utils import subclass
 
-# NOTE: Increment this everytime the pickled object changes
+# NOTE: Increment this every time the pickled object changes
 PICKLE_VERSION = 1
 
+
+@subclass
 class DatasetJob(Job):
     """
     A Job that creates a dataset
@@ -17,42 +20,38 @@ class DatasetJob(Job):
         super(DatasetJob, self).__init__(**kwargs)
         self.pickver_job_dataset = PICKLE_VERSION
 
-    def parse_folder_tasks(self):
+    def get_backend(self):
         """
-        Return all ParseFolderTasks for this job
+        Return the DB backend used to create this dataset
         """
-        return [t for t in self.tasks if isinstance(t, tasks.ParseFolderTask)]
+        raise NotImplementedError('Please implement me')
 
-    def create_db_tasks(self):
+    def get_entry_count(self, stage):
         """
-        Return all CreateDbTasks for this job
+        Return the number of entries in the DB matching the specified stage
         """
-        return [t for t in self.tasks if isinstance(t, tasks.CreateDbTask)]
+        raise NotImplementedError('Please implement me')
 
-    def train_db_task(self):
+    def get_feature_db_path(self, stage):
         """
-        Return the task that creates the training set
+        Return the absolute feature DB path for the specified stage
         """
-        for t in self.tasks:
-            if isinstance(t, tasks.CreateDbTask) and 'train' in t.name().lower():
-                return t
-        return None
+        raise NotImplementedError('Please implement me')
 
-    def val_db_task(self):
+    def get_feature_dims(self):
         """
-        Return the task that creates the validation set
+        Return the shape of the feature N-D array
         """
-        for t in self.tasks:
-            if isinstance(t, tasks.CreateDbTask) and 'val' in t.name().lower():
-                return t
-        return None
+        raise NotImplementedError('Please implement me')
 
-    def test_db_task(self):
+    def get_label_db_path(self, stage):
         """
-        Return the task that creates the test set
+        Return the absolute label DB path for the specified stage
         """
-        for t in self.tasks:
-            if isinstance(t, tasks.CreateDbTask) and 'test' in t.name().lower():
-                return t
-        return None
+        raise NotImplementedError('Please implement me')
 
+    def get_mean_file(self):
+        """
+        Return the mean file
+        """
+        raise NotImplementedError('Please implement me')

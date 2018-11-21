@@ -1,3 +1,32 @@
-# Ignore these file types
-*.pyc
+# Temporary files
 *.swp
+*~
+.DS_Store
+TAGS
+
+# Compiled / optimized files
+*.py[cod]
+
+# Tests
+/.coverage
+
+# virtualenv
+/venv/
+
+# setuptools
+/build/
+/dist/
+*.egg-info/
+
+#Intellij files
+.idea/
+
+#vscode
+.vscode/
+
+#.project
+.project
+/.project
+
+#.tb
+.tb/

@@ -1,10 +1,11 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
 from flask.ext.wtf import Form
-from wtforms import StringField
 from wtforms.validators import DataRequired
 
-from .. import utils
+from digits import utils
+
 
 class DatasetForm(Form):
     """
@@ -12,7 +13,10 @@ class DatasetForm(Form):
     (abstract class)
     """
 
-    dataset_name = StringField(u'Dataset Name',
-            validators=[DataRequired()]
-            )
+    dataset_name = utils.forms.StringField(u'Dataset Name',
+                                           validators=[DataRequired()]
+                                           )
 
+    group_name = utils.forms.StringField('Group Name',
+                                         tooltip="An optional group name for organization on the main page."
+                                         )

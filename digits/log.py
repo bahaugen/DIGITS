@@ -1,16 +1,18 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
-import sys
-import os
 import logging
 import logging.handlers
+import sys
 
-from digits.config import config_option
+from digits.config import config_value
 
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
+
 class JobIdLogger(logging.Logger):
+
     def makeRecord(self, name, level, fn, lno, msg, args, exc_info, func=None, extra=None):
         """
         Customizing it to set a default value for extra['job_id']
@@ -25,6 +27,7 @@ class JobIdLogger(logging.Logger):
             rv.__dict__['job_id'] = ''
         return rv
 
+
 class JobIdLoggerAdapter(logging.LoggerAdapter):
     """
     Accepts an optional keyword argument: 'job_id'
@@ -33,10 +36,11 @@ class JobIdLoggerAdapter(logging.LoggerAdapter):
         1. On class initialization
             adapter = JobIdLoggerAdapter(logger, {'job_id': job_id})
             adapter.debug(msg)
-        2. On method invokation
+        2. On method invocation
             adapter = JobIdLoggerAdapter(logger, {})
             adapter.debug(msg, job_id=id)
     """
+
     def process(self, msg, kwargs):
         if 'job_id' in kwargs:
             if 'extra' not in kwargs:
@@ -49,19 +53,17 @@ class JobIdLoggerAdapter(logging.LoggerAdapter):
             kwargs['extra']['job_id'] = ' [%s]' % self.extra['job_id']
         return msg, kwargs
 
-def setup_logging():
-    socketio_logger = logging.getLogger('socketio')
-    socketio_logger.addHandler(logging.StreamHandler(sys.stdout))
 
+def setup_logging():
     # Set custom logger
     logging.setLoggerClass(JobIdLogger)
 
     formatter = logging.Formatter(
-            fmt="%(asctime)s%(job_id)s [%(levelname)-5s] %(message)s",
-            datefmt=DATE_FORMAT,
-            )
+        fmt="%(asctime)s%(job_id)s [%(levelname)-5s] %(message)s",
+        datefmt=DATE_FORMAT,
+    )
 
-    ### digits logger
+    # digits logger
 
     main_logger = logging.getLogger('digits')
     main_logger.setLevel(logging.DEBUG)
@@ -71,36 +73,30 @@ def setup_logging():
     stdoutHandler.setLevel(logging.DEBUG)
     main_logger.addHandler(stdoutHandler)
 
-    ### digits.webapp logger
+    # digits.webapp logger
 
-    if config_option('log_file'):
+    logfile_filename = config_value('log_file')['filename']
+    logfile_level = config_value('log_file')['level']
+
+    if logfile_filename is not None:
         webapp_logger = logging.getLogger('digits.webapp')
         webapp_logger.setLevel(logging.DEBUG)
         # Log to file
         fileHandler = logging.handlers.RotatingFileHandler(
-                config_option('log_file'),
-                maxBytes=(1024*1024*10), # 10 MB
-                backupCount=10,
-                )
+            logfile_filename,
+            maxBytes=(1024 * 1024 * 10),  # 10 MB
+            backupCount=10,
+        )
         fileHandler.setFormatter(formatter)
-        if config_option('log_level') == 'debug':
-            fileHandler.setLevel(logging.DEBUG)
-        elif config_option('log_level') == 'info':
-            fileHandler.setLevel(logging.INFO)
-        elif config_option('log_level') == 'warning':
-            fileHandler.setLevel(logging.WARNING)
-        elif config_option('log_level') == 'error':
-            fileHandler.setLevel(logging.ERROR)
-        elif config_option('log_level') == 'critical':
-            fileHandler.setLevel(logging.CRITICAL)
+        fileHandler.setLevel(logfile_level)
         webapp_logger.addHandler(fileHandler)
 
-        ### Useful shortcut for the webapp, which may set job_id
+        # Useful shortcut for the webapp, which may set job_id
 
         return JobIdLoggerAdapter(webapp_logger, {})
     else:
+        print 'WARNING: log_file config option not found - no log file is being saved'
         return JobIdLoggerAdapter(main_logger, {})
 
 # Do it when this module is loaded
 logger = setup_logging()
-

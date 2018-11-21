@@ -1,13 +1,11 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
-from . import caffe_train as _
+from digits import test_utils
+
 
 def test_caffe_imports():
-    import numpy
-    import google.protobuf
-    import skimage
-    import scipy
-    import leveldb
-    import matplotlib
-    import networkx
+    test_utils.skipIfNotFramework('caffe')
 
+    import numpy  # noqa
+    import google.protobuf  # noqa

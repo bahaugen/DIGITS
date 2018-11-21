@@ -1,21 +1,25 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
-import os.path
-import re
-import time
 import logging
+import os.path
+import platform
+import re
+import signal
 import subprocess
+import time
 
-from flask import render_template
+import flask
 import gevent.event
 
 from . import utils
+from .config import config_value
+from .status import Status, StatusCls
 import digits.log
-from config import config_option
-from status import Status, StatusCls
 
-# NOTE: Increment this everytime the pickled version changes
+# NOTE: Increment this every time the pickled version changes
 PICKLE_VERSION = 1
+
 
 class Task(StatusCls):
     """
@@ -40,11 +44,11 @@ class Task(StatusCls):
         else:
             raise TypeError('parents is %s' % type(parents))
 
-        self.progress = 0
         self.exception = None
         self.traceback = None
         self.aborted = gevent.event.Event()
         self.set_logger()
+        self.p = None  # Subprocess object for training
 
     def __getstate__(self):
         d = self.__dict__.copy()
@@ -53,6 +57,9 @@ class Task(StatusCls):
             del d['aborted']
         if 'logger' in d:
             del d['logger']
+        if 'p' in d:
+            # Subprocess object for training is not pickleable
+            del d['p']
 
         return d
 
@@ -64,15 +71,15 @@ class Task(StatusCls):
 
     def set_logger(self):
         self.logger = digits.log.JobIdLoggerAdapter(
-                logging.getLogger('digits.webapp'),
-                {'job_id': self.job_id},
-                )
+            logging.getLogger('digits.webapp'),
+            {'job_id': self.job_id},
+        )
 
     def name(self):
         """
         Returns a string
         """
-        raise NotImplementedError('Please implement me')
+        raise NotImplementedError
 
     def html_id(self):
         """
@@ -88,25 +95,30 @@ class Task(StatusCls):
 
         # Send socketio updates
         message = {
-                'task': self.html_id(),
-                'update': 'status',
-                'status': self.status.name,
-                'css': self.status.css,
-                'show': (self.status in [Status.RUN, Status.ERROR]),
-                'running': self.status.is_running(),
-                }
+            'task': self.html_id(),
+            'update': 'status',
+            'status': self.status.name,
+            'css': self.status.css,
+            'show': (self.status in [Status.RUN, Status.ERROR]),
+            'running': self.status.is_running(),
+        }
         with app.app_context():
-            message['html'] = render_template('status_updates.html',
-                    updates     = self.status_history,
-                    exception   = self.exception,
-                    traceback   = self.traceback,
-                    )
+            message['html'] = flask.render_template('status_updates.html',
+                                                    updates=self.status_history,
+                                                    exception=self.exception,
+                                                    traceback=self.traceback,
+                                                    )
 
         socketio.emit('task update',
-                message,
-                namespace='/jobs',
-                room=self.job_id,
-                )
+                      message,
+                      namespace='/jobs',
+                      room=self.job_id,
+                      )
+
+        from digits.webapp import scheduler
+        job = scheduler.get_job(self.job_id)
+        if job:
+            job.on_status_update()
 
     def path(self, filename, relative=False):
         """
@@ -125,9 +137,9 @@ class Task(StatusCls):
             path = filename
         else:
             path = os.path.join(self.job_dir, filename)
-        if relative:
-            path = os.path.relpath(path, config_option('jobs_dir'))
-        return str(path)
+            if relative:
+                path = os.path.relpath(path, config_value('jobs_dir'))
+        return str(path).replace("\\", "/")
 
     def ready_to_queue(self):
         """
@@ -140,12 +152,25 @@ class Task(StatusCls):
                 return False
         return True
 
-    def task_arguments(self, **kwargs):
+    def offer_resources(self, resources):
+        """
+        Check the available resources and return a set of requested resources
+
+        Arguments:
+        resources -- a copy of scheduler.resources
+        """
+        raise NotImplementedError
+
+    def task_arguments(self, resources, env):
         """
         Returns args used by subprocess.Popen to execute the task
         Returns False if the args cannot be set properly
+
+        Arguments:
+        resources -- the resources assigned by the scheduler for this task
+        environ   -- os.environ instance to run process in
         """
-        raise NotImplementedError('Please implement me')
+        raise NotImplementedError
 
     def before_run(self):
         """
@@ -154,13 +179,17 @@ class Task(StatusCls):
         """
         pass
 
-    def run(self, **kwargs):
+    def run(self, resources):
         """
         Execute the task
+
+        Arguments:
+        resources -- the resources assigned by the scheduler for this task
         """
         self.before_run()
 
-        args = self.task_arguments(**kwargs)
+        env = os.environ.copy()
+        args = self.task_arguments(resources, env)
         if not args:
             self.logger.error('Could not create the arguments for Popen')
             self.status = Status.ERROR
@@ -173,19 +202,35 @@ class Task(StatusCls):
 
         unrecognized_output = []
 
-        p = subprocess.Popen(args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                cwd=self.job_dir,
-                close_fds=True,
-                )
+        import sys
+        env['PYTHONPATH'] = os.pathsep.join(['.', self.job_dir, env.get('PYTHONPATH', '')] + sys.path)
+
+        # https://docs.python.org/2/library/subprocess.html#converting-argument-sequence
+        if platform.system() == 'Windows':
+            args = ' '.join(args)
+            self.logger.info('Task subprocess args: "{}"'.format(args))
+        else:
+            self.logger.info('Task subprocess args: "%s"' % ' '.join(args))
+
+        self.p = subprocess.Popen(args,
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT,
+                                  cwd=self.job_dir,
+                                  close_fds=False if platform.system() == 'Windows' else True,
+                                  env=env,
+                                  )
 
         try:
-            while p.poll() is None:
-                for line in utils.nonblocking_readlines(p.stdout):
+            sigterm_time = None  # When was the SIGTERM signal sent
+            sigterm_timeout = 2  # When should the SIGKILL signal be sent
+            while self.p.poll() is None:
+                for line in utils.nonblocking_readlines(self.p.stdout):
                     if self.aborted.is_set():
-                        p.terminate()
-                        self.status = Status.ABORT
+                        if sigterm_time is None:
+                            # Attempt graceful shutdown
+                            self.p.send_signal(signal.SIGTERM)
+                            sigterm_time = time.time()
+                            self.status = Status.ABORT
                         break
 
                     if line is not None:
@@ -194,12 +239,17 @@ class Task(StatusCls):
 
                     if line:
                         if not self.process_output(line):
-                            self.logger.warning('%s unrecognized input: %s' % (self.name(), line.strip()))
+                            self.logger.warning('%s unrecognized output: %s' % (self.name(), line.strip()))
                             unrecognized_output.append(line)
                     else:
                         time.sleep(0.05)
+                if sigterm_time is not None and (time.time() - sigterm_time > sigterm_timeout):
+                    self.p.send_signal(signal.SIGKILL)
+                    self.logger.warning('Sent SIGKILL to task "%s"' % self.name())
+                    time.sleep(0.1)
+                time.sleep(0.01)
         except:
-            p.terminate()
+            self.p.terminate()
             self.after_run()
             raise
 
@@ -207,12 +257,15 @@ class Task(StatusCls):
 
         if self.status != Status.RUN:
             return False
-        elif p.returncode != 0:
-            self.logger.error('%s task failed with error code %d' % (self.name(), p.returncode))
+        elif self.p.returncode != 0:
+            self.logger.error('%s task failed with error code %d' % (self.name(), self.p.returncode))
             if self.exception is None:
-                self.exception = 'error code %d' % p.returncode
+                self.exception = 'error code %d' % self.p.returncode
                 if unrecognized_output:
-                    self.traceback = '\n'.join(unrecognized_output)
+                    if self.traceback is None:
+                        self.traceback = '\n'.join(unrecognized_output)
+                    else:
+                        self.traceback = self.traceback + ('\n'.join(unrecognized_output))
             self.after_runtime_error()
             self.status = Status.ERROR
             return False
@@ -230,7 +283,7 @@ class Task(StatusCls):
 
     def preprocess_output_digits(self, line):
         """
-        Takes line of output and parses it according to DiGiTS's log format
+        Takes line of output and parses it according to DIGITS's log format
         Returns (timestamp, level, message) or (None, None, None)
         """
         # NOTE: This must change when the logging format changes
@@ -255,7 +308,6 @@ class Task(StatusCls):
         else:
             return (None, None, None)
 
-
     def process_output(self, line):
         """
         Process a line of output from the task
@@ -264,7 +316,7 @@ class Task(StatusCls):
         Arguments:
         line -- a line of output
         """
-        raise NotImplementedError('Please implement me')
+        raise NotImplementedError
 
     def est_done(self):
         """
@@ -287,3 +339,23 @@ class Task(StatusCls):
         """
         pass
 
+    def emit_progress_update(self):
+        """
+        Call socketio.emit for task progress update, and trigger job progress update.
+        """
+        from digits.webapp import socketio
+        socketio.emit('task update',
+                      {
+                          'task': self.html_id(),
+                          'update': 'progress',
+                          'percentage': int(round(100 * self.progress)),
+                          'eta': utils.time_filters.print_time_diff(self.est_done()),
+                      },
+                      namespace='/jobs',
+                      room=self.job_id,
+                      )
+
+        from digits.webapp import scheduler
+        job = scheduler.get_job(self.job_id)
+        if job:
+            job.emit_progress_update()

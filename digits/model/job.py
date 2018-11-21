@@ -1,10 +1,13 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
-from digits.job import Job
 from . import tasks
+from digits.job import Job
+from digits.utils import override
 
-# NOTE: Increment this everytime the pickled object changes
+# NOTE: Increment this every time the pickled object changes
 PICKLE_VERSION = 1
+
 
 class ModelJob(Job):
     """
@@ -32,6 +35,17 @@ class ModelJob(Job):
         super(ModelJob, self).__setstate__(state)
         self.dataset = None
 
+    @override
+    def json_dict(self, verbose=False):
+        d = super(ModelJob, self).json_dict(verbose)
+        d['dataset_id'] = self.dataset_id
+
+        if verbose:
+            d.update({
+                'snapshots': [s[1] for s in self.train_task().snapshots],
+            })
+        return d
+
     def load_dataset(self):
         from digits.webapp import scheduler
         job = scheduler.get_job(self.dataset_id)
@@ -44,3 +58,9 @@ class ModelJob(Job):
         """Return the first TrainTask for this job"""
         return [t for t in self.tasks if isinstance(t, tasks.TrainTask)][0]
 
+    def download_files(self):
+        """
+        Returns a list of tuples: [(path, filename)...]
+        These files get added to an archive when this job is downloaded
+        """
+        return NotImplementedError()

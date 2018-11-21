@@ -1,4 +1,8 @@
-# Copyright (c) 2014-2015, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2014-2017, NVIDIA CORPORATION.  All rights reserved.
+from __future__ import absolute_import
 
-from job import ImageDatasetJob
-from classification import *
+from .classification import *  # noqa
+from .generic import *  # noqa
+from .job import ImageDatasetJob
+
+__all__ = ['ImageDatasetJob']
